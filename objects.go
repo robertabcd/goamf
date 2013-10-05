@@ -74,11 +74,11 @@ type Traits struct {
 }
 
 var (
-	userdefinedTypes = make(map[string]*DefinedType)
+	userDefinedTypes = make(map[string]*DefinedType)
 )
 
 func RegisterType(className string, t interface{}, external bool) {
-	userdefinedTypes[className] = &DefinedType{
+	userDefinedTypes[className] = &DefinedType{
 		ClassName: className,
 		Type:      reflect.TypeOf(t),
 		External:  external,

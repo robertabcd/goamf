@@ -19,7 +19,7 @@ func setReflectValue(dst reflect.Value, srcif interface{}) error {
 }
 
 func createReflectObject(v reflect.Value, defaultType reflect.Type) error {
-	fmt.Println("createReflectObject", "v.Type()", v.Type(), "defaultType", defaultType)
+	//fmt.Println("createReflectObject", "v.Type()", v.Type(), "defaultType", defaultType)
 	if !v.CanSet() {
 		panic("v is not settable")
 		//return fmt.Errorf("v is not settable")

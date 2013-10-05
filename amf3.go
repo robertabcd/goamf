@@ -9,6 +9,8 @@ import (
 )
 
 type Decoder struct {
+	UserDefinedTypes map[string]*DefinedType
+
 	reader io.Reader
 
 	stringRefs refTable
@@ -81,8 +83,6 @@ func (d *Decoder) readValue(vptr interface{}) error {
 	if err != nil {
 		return err
 	}
-
-	//fmt.Println("Marker:", marker)
 
 	switch Marker(marker) {
 	case MarkerArray:
@@ -186,7 +186,7 @@ func (d *Decoder) readArray(vptr interface{}) error {
 	case reflect.Slice:
 		arrayCappable = true
 	}
-	fmt.Println("readArray to", v.Type(), "isTypedObject", isTypedObject, "assocCappable", assocCappable, "arrayCappable", arrayCappable)
+	d.logPrintln("readArray to", v.Type(), "isTypedObject", isTypedObject, "assocCappable", assocCappable, "arrayCappable", arrayCappable)
 
 readMemberLoop:
 	for {
@@ -219,7 +219,7 @@ readMemberLoop:
 			if assocCappable {
 				v.SetMapIndex(reflect.ValueOf(key), reflectResolveType(v.Type().Elem().Kind(), reflect.ValueOf(val)))
 			} else {
-				fmt.Println("Ignore key", key)
+				d.logPrintln("Ignore key", key)
 			}
 		}
 	}
@@ -236,7 +236,7 @@ readMemberLoop:
 				return err
 			}
 			vrefl := reflect.ValueOf(val)
-			fmt.Println("vrefl", vrefl.Interface(), "Type", vrefl.Type())
+			d.logPrintln("vrefl", vrefl.Interface(), "Type", vrefl.Type())
 			if vrefl.Kind() != reflect.Ptr {
 				vrefl = vrefl.Addr()
 			}
@@ -246,7 +246,7 @@ readMemberLoop:
 			if arrayCappable {
 				v.Set(reflect.Append(v, reflectResolveType(v.Type().Elem().Kind(), reflect.ValueOf(val))))
 			} else {
-				fmt.Println("Ignore index", i)
+				d.logPrintln("Ignore index", i)
 			}
 		}
 	}
@@ -266,7 +266,6 @@ func (d *Decoder) readObject(vptr interface{}) error {
 	}
 
 	// Handle reference to object
-	//fmt.Println("ref", ref)
 	if (ref & 1) == 0 {
 		if val, err := d.objectRefs.Get(int(ref >> 1)); err != nil {
 			return err
@@ -282,7 +281,7 @@ func (d *Decoder) readObject(vptr interface{}) error {
 			return err
 		} else {
 			traits = t.(*Traits)
-			fmt.Println("Traits ref: class="+traits.ClassName, "members=", traits.Members)
+			d.logPrintln("Traits ref: class="+traits.ClassName, "members=", traits.Members)
 		}
 	} else {
 		traits = &Traits{}
@@ -323,11 +322,11 @@ func (d *Decoder) readObject(vptr interface{}) error {
 			if v.Kind() == reflect.Ptr {
 				v = v.Elem()
 			}
-			fmt.Println("Initialized value for object", traits.ClassName, "Type", v.Type())
+			d.logPrintln("Initialized value for object", traits.ClassName, "Type", v.Type())
 		}
 	default:
 		v.Set(reflect.New(v.Type()).Elem())
-		fmt.Println("Set zero value for object", traits.ClassName, "Type", v.Type())
+		d.logPrintln("Set zero value for object", traits.ClassName, "Type", v.Type())
 	}
 	if v.Kind() == reflect.Ptr {
 		panic("Must be resolved")
@@ -347,13 +346,13 @@ func (d *Decoder) readObject(vptr interface{}) error {
 
 	switch tobj := v.Interface().(type) {
 	case TypedObject:
-		fmt.Println("readObject: reading into TypedObject")
+		d.logPrintln("readObject: reading into TypedObject")
 		for _, key := range traits.Members {
 			var val interface{}
 			if err := d.readValue(&val); err != nil {
 				return err
 			}
-			fmt.Println("Read key", key, "value", val)
+			d.logPrintln("Read key", key, "value", val)
 			tobj.Assoc[key] = val
 		}
 		if traits.Dynamic {
@@ -370,12 +369,12 @@ func (d *Decoder) readObject(vptr interface{}) error {
 					if err := d.readValue(&val); err != nil {
 						return err
 					}
-					fmt.Println("Read dynamic key", key, "value", val)
+					d.logPrintln("Read dynamic key", key, "value", val)
 					tobj.Assoc[key] = val
 				}
 			}
 		}
-		fmt.Println("Read TypedObject:", tobj)
+		d.logPrintln("Read TypedObject:", tobj)
 	default:
 		for _, key := range traits.Members {
 			if _, err := d.readObjectField(v, key); err != nil {
@@ -395,7 +394,7 @@ func (d *Decoder) readObject(vptr interface{}) error {
 					if ignored, err := d.readObjectField(v, key); err != nil {
 						return err
 					} else if ignored {
-						fmt.Println("ignore key", key, "in class", traits.ClassName)
+						d.logPrintln("ignore key", key, "in class", traits.ClassName)
 					}
 				}
 			}
@@ -418,15 +417,15 @@ func (d *Decoder) readObjectField(v reflect.Value, key string) (ignored bool, er
 	if !field.IsValid() {
 		var tmpobj interface{}
 		field = reflect.ValueOf(&tmpobj).Elem()
-		fmt.Println("Prepared dummy value for non-exist key", key)
+		d.logPrintln("Prepared dummy value for non-exist key", key)
 		ignored = true
 	}
 	if !field.CanSet() {
-		fmt.Println("v.Type()", v.Type())
-		fmt.Println("field.Type():", field.Type())
+		d.logPrintln("v.Type()", v.Type())
+		d.logPrintln("field.Type():", field.Type())
 		panic("field not settable")
 	}
-	fmt.Println("Original field type", field.Type())
+	d.logPrintln("Original field type", field.Type())
 	if field.Kind() == reflect.Ptr {
 		if field.IsNil() {
 			if err = createReflectObject(field, field.Type().Elem()); err != nil {
@@ -437,7 +436,7 @@ func (d *Decoder) readObjectField(v reflect.Value, key string) (ignored bool, er
 		field = field.Addr()
 	}
 	err = d.readValue(field.Interface())
-	fmt.Println("Read field key", key, "type", field.Type(), "value", field.Elem().Interface())
+	d.logPrintln("Read field key", key, "type", field.Type(), "value", field.Elem().Interface())
 	return
 }
 
@@ -451,13 +450,19 @@ func (d *Decoder) readExternalObject(traits *Traits, vptr interface{}) error {
 }
 
 func (d *Decoder) createObject(traits *Traits) interface{} {
-	// TODO
-	//fmt.Println(traits)
-	if dt, ok := userdefinedTypes[traits.ClassName]; ok {
+	types := userDefinedTypes
+	if d.UserDefinedTypes != nil {
+		types = d.UserDefinedTypes
+	}
+	if dt, ok := types[traits.ClassName]; ok {
 		return reflect.New(dt.Type).Interface()
 	}
 	return &TypedObject{
 		Assoc: make(map[string]interface{}),
 		Array: make([]interface{}, 0, 0),
 	}
+}
+
+func (d *Decoder) logPrintln(objs ...interface{}) {
+	//fmt.Println(objs...)
 }
