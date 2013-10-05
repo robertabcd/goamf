@@ -77,18 +77,28 @@ func (d *Decoder) readString() (string, error) {
 }
 
 func (d *Decoder) readValue(vptr interface{}) error {
-	v := reflect.ValueOf(vptr)
-	if v.Kind() != reflect.Ptr {
-		panic("Must pass a pointer")
-	}
-	v = v.Elem()
-
 	marker, err := d.readUInt8()
 	if err != nil {
 		return err
 	}
 
 	//fmt.Println("Marker:", marker)
+
+	switch Marker(marker) {
+	case MarkerArray:
+		return d.readArray(vptr)
+	case MarkerObject:
+		return d.readObject(vptr)
+	}
+
+	v := reflect.ValueOf(vptr)
+	if v.Kind() != reflect.Ptr {
+		panic("Must pass a pointer")
+	}
+	if v.IsNil() {
+		v.Set(reflect.New(v.Type().Elem()))
+	}
+	v = v.Elem()
 
 	switch Marker(marker) {
 	case MarkerUndefined:
@@ -132,10 +142,6 @@ func (d *Decoder) readValue(vptr interface{}) error {
 		// TODO
 	case MarkerDate:
 		// TODO
-	case MarkerArray:
-		return d.readArray(vptr)
-	case MarkerObject:
-		return d.readObject(vptr)
 	}
 
 	return fmt.Errorf("Unhandled marker: %d", marker)
@@ -341,7 +347,7 @@ func (d *Decoder) readObject(vptr interface{}) error {
 
 	switch tobj := v.Interface().(type) {
 	case TypedObject:
-		fmt.Println("readObject: reading into *TypedObject")
+		fmt.Println("readObject: reading into TypedObject")
 		for _, key := range traits.Members {
 			var val interface{}
 			if err := d.readValue(&val); err != nil {
@@ -421,7 +427,13 @@ func (d *Decoder) readObjectField(v reflect.Value, key string) (ignored bool, er
 		panic("field not settable")
 	}
 	fmt.Println("Original field type", field.Type())
-	if field.Kind() != reflect.Ptr {
+	if field.Kind() == reflect.Ptr {
+		if field.IsNil() {
+			if err = createReflectObject(field, field.Type().Elem()); err != nil {
+				return
+			}
+		}
+	} else {
 		field = field.Addr()
 	}
 	err = d.readValue(field.Interface())

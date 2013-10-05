@@ -32,7 +32,7 @@ func createReflectObject(v reflect.Value, defaultType reflect.Type) error {
 		v.Set(reflect.MakeMap(v.Type()))
 		return nil
 	case reflect.Ptr:
-		v.Set(reflect.New(v.Elem().Type()))
+		v.Set(reflect.New(v.Type().Elem()))
 		return nil
 	case reflect.Interface:
 		v.Set(reflect.New(reflectRemoveTypePtrs(defaultType)))
