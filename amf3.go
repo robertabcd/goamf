@@ -2,95 +2,11 @@ package amf
 
 import (
 	"encoding/binary"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"reflect"
-	"strconv"
 	"strings"
 )
-
-type DefinedType struct {
-	ClassName string
-	Type      reflect.Type
-	External  bool
-}
-
-var (
-	userdefinedTypes = make(map[string]*DefinedType)
-)
-
-func RegisterType(className string, t interface{}, external bool) {
-	userdefinedTypes[className] = &DefinedType{
-		ClassName: className,
-		Type:      reflect.TypeOf(t),
-		External:  external,
-	}
-}
-
-type Marker uint8
-
-const (
-	MarkerUndefined Marker = iota
-	MarkerNull
-	MarkerFalse
-	MarkerTrue
-	MarkerInteger
-	MarkerDouble
-	MarkerString
-	MarkerXMLDoc
-	MarkerDate
-	MarkerArray
-	MarkerObject
-	MarkerXML
-	MarkerByteArray
-)
-
-type AMF3Undefined struct{}
-type AMF3Null struct{}
-
-func (_ AMF3Null) MarshalJSON() ([]byte, error) {
-	return json.Marshal(nil)
-}
-
-type TypedObject struct {
-	Assoc map[string]interface{} `json:"assoc,omitempty"`
-	Array []interface{}          `json:"array,omitempty"`
-}
-
-func (t TypedObject) MarshalJSON() ([]byte, error) {
-	if len(t.Assoc) == 0 && len(t.Array) == 0 {
-		return json.Marshal(map[string]interface{}{})
-	} else if len(t.Assoc) == 0 {
-		return json.Marshal(t.Array)
-	} else if len(t.Array) == 0 {
-		return json.Marshal(t.Assoc)
-	} else {
-		m := make(map[string]interface{})
-		for k, v := range t.Assoc {
-			m[k] = v
-		}
-		for i, v := range t.Array {
-			m[strconv.Itoa(i)] = v
-		}
-		return json.Marshal(m)
-	}
-	panic("Not reached")
-}
-
-type refTable []interface{}
-
-func (r *refTable) Get(i int) (interface{}, error) {
-	if i >= 0 && i < len(*r) {
-		return (*r)[i], nil
-	}
-	return nil, errors.New("refTable index out-of-bounds")
-}
-
-func (r *refTable) Add(v interface{}) {
-	*r = append(*r, v)
-}
 
 type Decoder struct {
 	reader io.Reader
@@ -100,14 +16,6 @@ type Decoder struct {
 	traitsRefs refTable
 }
 
-type Traits struct {
-	ClassName string
-	External  bool
-	Dynamic   bool
-	Nmemb     int
-	Members   []string
-}
-
 func NewDecoder(reader io.Reader) *Decoder {
 	return &Decoder{
 		reader: reader,
@@ -115,8 +23,7 @@ func NewDecoder(reader io.Reader) *Decoder {
 }
 
 func (d *Decoder) Decode(objptr interface{}) error {
-	v := reflect.ValueOf(objptr)
-	return d.readReflectValue(&v)
+	return d.readValue(objptr)
 }
 
 func (d *Decoder) readUInt8() (uint8, error) {
@@ -169,14 +76,13 @@ func (d *Decoder) readString() (string, error) {
 	return str, nil
 }
 
-func checkError(v reflect.Value, err error) (reflect.Value, error) {
-	if err != nil {
-		return reflect.Zero(reflect.TypeOf(v.Interface())), err
+func (d *Decoder) readValue(vptr interface{}) error {
+	v := reflect.ValueOf(vptr)
+	if v.Kind() != reflect.Ptr {
+		panic("Must pass a pointer")
 	}
-	return v, nil
-}
+	v = v.Elem()
 
-func (d *Decoder) readReflectValue(v *reflect.Value) error {
 	marker, err := d.readUInt8()
 	if err != nil {
 		return err
@@ -186,32 +92,38 @@ func (d *Decoder) readReflectValue(v *reflect.Value) error {
 
 	switch Marker(marker) {
 	case MarkerUndefined:
-		return setReflectValue(v, reflect.ValueOf(AMF3Undefined{}))
+		switch v.Kind() {
+		case reflect.Interface, reflect.Ptr:
+			return setReflectValue(v, &AMF3Undefined{})
+		default:
+			return fmt.Errorf("Read Undefined: Incompatible type")
+		}
 	case MarkerNull:
-		return setReflectValue(v, reflect.ValueOf(AMF3Null{}))
+		v.Set(reflect.New(v.Type()).Elem())
+		return nil
 	case MarkerFalse:
-		return setReflectValue(v, reflect.ValueOf(false))
+		return setReflectValue(v, false)
 	case MarkerTrue:
-		return setReflectValue(v, reflect.ValueOf(true))
+		return setReflectValue(v, true)
 	case MarkerInteger:
 		i, err := d.readUInt29()
 		if err != nil {
 			return err
 		}
 		// TODO sign extension
-		return setReflectValue(v, reflect.ValueOf(i))
+		return setReflectValue(v, i)
 	case MarkerDouble:
 		var f float64
 		if err := binary.Read(d.reader, binary.BigEndian, &f); err != nil {
 			return err
 		}
-		return setReflectValue(v, reflect.ValueOf(f))
+		return setReflectValue(v, f)
 	case MarkerString:
 		str, err := d.readString()
 		if err != nil {
 			return err
 		}
-		return setReflectValue(v, reflect.ValueOf(str))
+		return setReflectValue(v, str)
 	case MarkerXMLDoc:
 		// TODO
 	case MarkerXML:
@@ -221,145 +133,24 @@ func (d *Decoder) readReflectValue(v *reflect.Value) error {
 	case MarkerDate:
 		// TODO
 	case MarkerArray:
-		if !v.IsValid() {
-			*v = reflect.ValueOf(new(TypedObject))
-		}
-		if err := d.readArray(v); err != nil {
-			return err
-		}
-		return nil
+		return d.readArray(vptr)
 	case MarkerObject:
-		ref, err := d.readUInt29()
-		if err != nil {
-			return err
-		}
-		//fmt.Println("ref", ref)
-		if (ref & 1) == 0 {
-			if val, err := d.objectRefs.Get(int(ref >> 1)); err != nil {
-				return err
-			} else {
-				return setReflectValue(v, reflect.ValueOf(val))
-			}
-		}
-		var traits *Traits
-		if (ref & 3) == 1 {
-			if t, err := d.traitsRefs.Get(int(ref >> 2)); err != nil {
-				return err
-			} else {
-				traits = t.(*Traits)
-				//fmt.Println("Traits ref: class="+traits.ClassName, "members=", traits.Members)
-			}
-		} else {
-			traits = &Traits{}
-
-			if (ref & 7) == 7 {
-				traits.External = true
-			} else {
-				traits.Dynamic = (ref>>3)&1 == 1
-				traits.Nmemb = int(ref >> 4)
-			}
-
-			cls, err := d.readString()
-			if err != nil {
-				return err
-			}
-			traits.ClassName = cls
-
-			for i := 0; i < traits.Nmemb; i++ {
-				key, err := d.readString()
-				if err != nil {
-					return err
-				}
-				traits.Members = append(traits.Members, key)
-			}
-
-			d.traitsRefs.Add(traits)
-		}
-
-		if traits.External {
-			at := len(d.objectRefs)
-			d.objectRefs = append(d.objectRefs, nil)
-			if err := d.readExternalObject(traits, v); err != nil {
-				return err
-			}
-			d.objectRefs[at] = v
-			return nil
-		} else {
-			obj := *v
-			if !v.IsValid() {
-				obj = d.createReflectObject(traits)
-			}
-			d.objectRefs.Add(obj.Interface())
-			switch tobj := obj.Interface().(type) {
-			case *TypedObject:
-				for _, key := range traits.Members {
-					var val reflect.Value
-					err := d.readReflectValue(&val)
-					if err != nil {
-						return err
-					}
-					//fmt.Println("Read key", key, "value", val.Interface())
-					tobj.Assoc[key] = reflect.Indirect(val).Interface()
-				}
-			default:
-				for _, key := range traits.Members {
-					lowerCase := strings.ToLower(key)
-					field := reflect.Indirect(obj).FieldByNameFunc(func(name string) bool {
-						return strings.ToLower(name) == lowerCase
-					})
-
-					y := false
-					if !field.IsValid() {
-						field = reflect.Value{}
-						//fmt.Println("Skipped field not found in struct:", key)
-					} else {
-						y = true
-					}
-
-					if err := d.readReflectValue(&field); err != nil {
-						return err
-					}
-
-					if y {
-						//fmt.Printf("key %s [valid=%t] in class %s: %s\n", key, field.IsValid(), traits.ClassName, field)
-					}
-
-					/*
-						if err := simpleSet(field, reflect.Indirect(val).Interface()); err != nil {
-							return fmt.Errorf("key %s in class %s: %s", key, traits.ClassName, err)
-						}
-					*/
-				}
-			}
-
-			if traits.Dynamic {
-				for {
-					key, err := d.readString()
-					if err != nil {
-						return err
-					}
-					if len(key) == 0 {
-						break
-					}
-					var val reflect.Value
-					if err := d.readReflectValue(&val); err != nil {
-						return err
-					} else if tobj, ok := obj.Interface().(*TypedObject); ok {
-						tobj.Assoc[key] = reflect.Indirect(val).Interface()
-					} else {
-						//fmt.Println("Skipped dynamic field:", key)
-					}
-				}
-			}
-			return setReflectValue(v, obj)
-		}
-		panic("Not reached")
+		return d.readObject(vptr)
 	}
 
 	return fmt.Errorf("Unhandled marker: %d", marker)
 }
 
-func (d *Decoder) readArray(v *reflect.Value) error {
+func (d *Decoder) readArray(vptr interface{}) error {
+	v := reflect.ValueOf(vptr)
+	if v.Kind() != reflect.Ptr {
+		return fmt.Errorf("vptr must be a pointer")
+	}
+	v = v.Elem()
+	if !v.CanSet() {
+		panic("readObject: v must be settable")
+	}
+
 	length, err := d.readUInt29()
 	if err != nil {
 		return err
@@ -368,11 +159,16 @@ func (d *Decoder) readArray(v *reflect.Value) error {
 		if val, err := d.objectRefs.Get(int(length >> 1)); err != nil {
 			return err
 		} else {
-			v.Set(reflect.ValueOf(val))
-			return nil
+			return setReflectValue(v, val)
 		}
 	}
 	length >>= 1
+
+	if v.IsNil() {
+		if err := createReflectObject(v, reflect.TypeOf(TypedObject{})); err != nil {
+			return err
+		}
+	}
 
 	d.objectRefs.Add(v.Interface())
 
@@ -381,65 +177,275 @@ func (d *Decoder) readArray(v *reflect.Value) error {
 	switch v.Kind() {
 	case reflect.Map:
 		assocCappable = true
-		if v.IsNil() {
-			v.Set(reflect.MakeMap(v.Type()))
-		}
-	case reflect.Slice, reflect.Array:
+	case reflect.Slice:
 		arrayCappable = true
-		if v.IsNil() {
-			v.Set(reflect.MakeSlice(v.Type(), 0, 0))
-		}
 	}
+	fmt.Println("readArray to", v.Type(), "isTypedObject", isTypedObject, "assocCappable", assocCappable, "arrayCappable", arrayCappable)
 
+readMemberLoop:
 	for {
 		key, err := d.readString()
-		if err != nil {
+		switch {
+		case err != nil:
 			return err
+		case len(key) == 0:
+			break readMemberLoop
 		}
-		if len(key) == 0 {
-			break
-		}
-		var val reflect.Value
-		if err := d.readReflectValue(&val); err != nil {
-			return err
-		}
+
 		if isTypedObject {
-			tobj.Assoc[key] = reflect.Indirect(val).Interface()
-		} else if assocCappable {
-			v.SetMapIndex(reflect.ValueOf(key), val)
+			var val interface{}
+			if err := d.readValue(&val); err != nil {
+				return err
+			}
+			tobj.Assoc[key] = val
+		} else {
+			var val interface{}
+			if err := createReflectObject(reflect.ValueOf(&val).Elem(), v.Type().Elem()); err != nil {
+				return err
+			}
+			vrefl := reflect.ValueOf(val)
+			if vrefl.Kind() != reflect.Ptr {
+				vrefl = vrefl.Addr()
+			}
+			if err := d.readValue(vrefl.Interface()); err != nil {
+				return err
+			}
+			if assocCappable {
+				v.SetMapIndex(reflect.ValueOf(key), reflectResolveType(v.Type().Elem().Kind(), reflect.ValueOf(val)))
+			} else {
+				fmt.Println("Ignore key", key)
+			}
 		}
 	}
 	for i := 0; i < int(length); i++ {
-		var val reflect.Value
-		if err := d.readReflectValue(&val); err != nil {
-			return err
-		}
 		if isTypedObject {
-			tobj.Array = append(tobj.Array, val.Interface())
-		} else if arrayCappable {
-			appendReflect(v, val)
+			var val interface{}
+			if err := d.readValue(&val); err != nil {
+				return err
+			}
+			tobj.Array = append(tobj.Array, val)
+		} else {
+			var val interface{}
+			if err := createReflectObject(reflect.ValueOf(&val).Elem(), v.Type().Elem()); err != nil {
+				return err
+			}
+			vrefl := reflect.ValueOf(val)
+			fmt.Println("vrefl", vrefl.Interface(), "Type", vrefl.Type())
+			if vrefl.Kind() != reflect.Ptr {
+				vrefl = vrefl.Addr()
+			}
+			if err := d.readValue(vrefl.Interface()); err != nil {
+				return err
+			}
+			if arrayCappable {
+				v.Set(reflect.Append(v, reflectResolveType(v.Type().Elem().Kind(), reflect.ValueOf(val))))
+			} else {
+				fmt.Println("Ignore index", i)
+			}
 		}
 	}
 	return nil
 }
 
-func (d *Decoder) readExternalObject(traits *Traits, v *reflect.Value) error {
+func (d *Decoder) readObject(vptr interface{}) error {
+	v := reflect.ValueOf(vptr)
+	if v.Kind() != reflect.Ptr {
+		return fmt.Errorf("vptr must be a pointer")
+	}
+	v = v.Elem()
+
+	ref, err := d.readUInt29()
+	if err != nil {
+		return err
+	}
+
+	// Handle reference to object
+	//fmt.Println("ref", ref)
+	if (ref & 1) == 0 {
+		if val, err := d.objectRefs.Get(int(ref >> 1)); err != nil {
+			return err
+		} else {
+			return setReflectValue(v, val)
+		}
+	}
+
+	// Read object traits or find from reference
+	var traits *Traits
+	if (ref & 3) == 1 {
+		if t, err := d.traitsRefs.Get(int(ref >> 2)); err != nil {
+			return err
+		} else {
+			traits = t.(*Traits)
+			fmt.Println("Traits ref: class="+traits.ClassName, "members=", traits.Members)
+		}
+	} else {
+		traits = &Traits{}
+
+		if (ref & 7) == 7 {
+			traits.External = true
+		} else {
+			traits.Dynamic = (ref>>3)&1 == 1
+			traits.Nmemb = int(ref >> 4)
+		}
+
+		cls, err := d.readString()
+		if err != nil {
+			return err
+		}
+		traits.ClassName = cls
+
+		for i := 0; i < traits.Nmemb; i++ {
+			key, err := d.readString()
+			if err != nil {
+				return err
+			}
+			traits.Members = append(traits.Members, key)
+		}
+
+		d.traitsRefs.Add(traits)
+	}
+
+	switch v.Kind() {
+	case reflect.Interface, reflect.Ptr:
+		if v.IsNil() {
+			if err := setReflectValue(v, d.createObject(traits)); err != nil {
+				return err
+			}
+			if v.Kind() == reflect.Interface {
+				v = v.Elem()
+			}
+			if v.Kind() == reflect.Ptr {
+				v = v.Elem()
+			}
+			fmt.Println("Initialized value for object", traits.ClassName, "Type", v.Type())
+		}
+	default:
+		v.Set(reflect.New(v.Type()).Elem())
+		fmt.Println("Set zero value for object", traits.ClassName, "Type", v.Type())
+	}
+	if v.Kind() == reflect.Ptr {
+		panic("Must be resolved")
+	}
+
+	d.objectRefs.Add(v.Interface())
+
+	// Handle external object
+	if traits.External {
+		refobj := d.objectRefs.Reserve()
+		if err := d.readExternalObject(traits, vptr); err != nil {
+			return err
+		}
+		*refobj = v
+		return nil
+	}
+
+	switch tobj := v.Interface().(type) {
+	case TypedObject:
+		fmt.Println("readObject: reading into *TypedObject")
+		for _, key := range traits.Members {
+			var val interface{}
+			if err := d.readValue(&val); err != nil {
+				return err
+			}
+			fmt.Println("Read key", key, "value", val)
+			tobj.Assoc[key] = val
+		}
+		if traits.Dynamic {
+		readDyanmicLoopTO:
+			for {
+				var val interface{}
+				key, err := d.readString()
+				switch {
+				case err != nil:
+					return err
+				case len(key) == 0:
+					break readDyanmicLoopTO
+				default:
+					if err := d.readValue(&val); err != nil {
+						return err
+					}
+					fmt.Println("Read dynamic key", key, "value", val)
+					tobj.Assoc[key] = val
+				}
+			}
+		}
+		fmt.Println("Read TypedObject:", tobj)
+	default:
+		for _, key := range traits.Members {
+			if _, err := d.readObjectField(v, key); err != nil {
+				return err
+			}
+		}
+		if traits.Dynamic {
+		readDyanmicLoop:
+			for {
+				key, err := d.readString()
+				switch {
+				case err != nil:
+					return err
+				case len(key) == 0:
+					break readDyanmicLoop
+				default:
+					if ignored, err := d.readObjectField(v, key); err != nil {
+						return err
+					} else if ignored {
+						fmt.Println("ignore key", key, "in class", traits.ClassName)
+					}
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+func (d *Decoder) readObjectField(v reflect.Value, key string) (ignored bool, err error) {
+	if !v.CanSet() {
+		panic("readObjectField: v must be settable")
+	}
+
+	lowerCase := strings.ToLower(key)
+	field := v.FieldByNameFunc(func(name string) bool {
+		return strings.ToLower(name) == lowerCase
+	})
+
+	if !field.IsValid() {
+		var tmpobj interface{}
+		field = reflect.ValueOf(&tmpobj).Elem()
+		fmt.Println("Prepared dummy value for non-exist key", key)
+		ignored = true
+	}
+	if !field.CanSet() {
+		fmt.Println("v.Type()", v.Type())
+		fmt.Println("field.Type():", field.Type())
+		panic("field not settable")
+	}
+	fmt.Println("Original field type", field.Type())
+	if field.Kind() != reflect.Ptr {
+		field = field.Addr()
+	}
+	err = d.readValue(field.Interface())
+	fmt.Println("Read field key", key, "type", field.Type(), "value", field.Elem().Interface())
+	return
+}
+
+func (d *Decoder) readExternalObject(traits *Traits, vptr interface{}) error {
 	// TODO
 	switch traits.ClassName {
 	case "flex.messaging.io.ArrayCollection":
-		return d.readReflectValue(v)
+		return d.readValue(vptr)
 	}
 	return fmt.Errorf("External object not implemented: class=%s", traits.ClassName)
 }
 
-func (d *Decoder) createReflectObject(traits *Traits) reflect.Value {
+func (d *Decoder) createObject(traits *Traits) interface{} {
 	// TODO
 	//fmt.Println(traits)
 	if dt, ok := userdefinedTypes[traits.ClassName]; ok {
-		return reflect.New(dt.Type)
+		return reflect.New(dt.Type).Interface()
 	}
-	return reflect.ValueOf(&TypedObject{
+	return &TypedObject{
 		Assoc: make(map[string]interface{}),
 		Array: make([]interface{}, 0, 0),
-	})
+	}
 }
