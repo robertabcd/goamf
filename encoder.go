@@ -145,8 +145,14 @@ func (e *Encoder) WriteValue(vif interface{}) error {
 		return e.WriteString(v.String())
 
 	case reflect.Slice:
+		panic("TODO") // TODO
+
 	case reflect.Map:
+		panic("TODO") // TODO
+
 	case reflect.Struct:
+		panic("TODO") // TODO
+
 	default:
 		return fmt.Errorf("Unhandled kind:", v.Kind())
 	}
@@ -188,7 +194,7 @@ func (e *Encoder) WriteObject(vif interface{}) error {
 		v = v.Elem()
 	}
 	if v.Kind() != reflect.Struct {
-		panic("Must be a slice")
+		panic("Must be a struct")
 	}
 
 	traits, ref := e.getReflectTraits(v)
@@ -220,6 +226,7 @@ func (e *Encoder) WriteObject(vif interface{}) error {
 	switch v.Interface().(type) {
 	case TypedObject:
 		// TODO
+		panic("TODO")
 
 	default:
 		for _, key := range traits.Members {
