@@ -25,19 +25,19 @@ func NewDecoder(reader io.Reader) *Decoder {
 }
 
 func (d *Decoder) Decode(objptr interface{}) error {
-	return d.readValue(objptr)
+	return d.ReadValue(objptr)
 }
 
-func (d *Decoder) readUInt8() (uint8, error) {
+func (d *Decoder) ReadUInt8() (uint8, error) {
 	b := []byte{0}
 	_, err := d.reader.Read(b)
 	return b[0], err
 }
 
-func (d *Decoder) readUInt29() (uint32, error) {
+func (d *Decoder) ReadUInt29() (uint32, error) {
 	var v uint32
 	for j := 0; j < 3; j++ {
-		b, err := d.readUInt8()
+		b, err := d.ReadUInt8()
 		if err != nil {
 			return 0, err
 		}
@@ -46,7 +46,7 @@ func (d *Decoder) readUInt29() (uint32, error) {
 			return v, nil
 		}
 	}
-	b, err := d.readUInt8()
+	b, err := d.ReadUInt8()
 	if err != nil {
 		return 0, err
 	}
@@ -54,8 +54,8 @@ func (d *Decoder) readUInt29() (uint32, error) {
 	return v, err
 }
 
-func (d *Decoder) readString() (string, error) {
-	length, err := d.readUInt29()
+func (d *Decoder) ReadString() (string, error) {
+	length, err := d.ReadUInt29()
 	if err != nil {
 		return "", err
 	}
@@ -78,17 +78,17 @@ func (d *Decoder) readString() (string, error) {
 	return str, nil
 }
 
-func (d *Decoder) readValue(vptr interface{}) error {
-	marker, err := d.readUInt8()
+func (d *Decoder) ReadValue(vptr interface{}) error {
+	marker, err := d.ReadUInt8()
 	if err != nil {
 		return err
 	}
 
 	switch Marker(marker) {
 	case MarkerArray:
-		return d.readArray(vptr)
+		return d.ReadArray(vptr)
 	case MarkerObject:
-		return d.readObject(vptr)
+		return d.ReadObject(vptr)
 	}
 
 	v := reflect.ValueOf(vptr)
@@ -116,7 +116,7 @@ func (d *Decoder) readValue(vptr interface{}) error {
 	case MarkerTrue:
 		return setReflectValue(v, true)
 	case MarkerInteger:
-		i, err := d.readUInt29()
+		i, err := d.ReadUInt29()
 		if err != nil {
 			return err
 		}
@@ -129,7 +129,7 @@ func (d *Decoder) readValue(vptr interface{}) error {
 		}
 		return setReflectValue(v, f)
 	case MarkerString:
-		str, err := d.readString()
+		str, err := d.ReadString()
 		if err != nil {
 			return err
 		}
@@ -147,17 +147,17 @@ func (d *Decoder) readValue(vptr interface{}) error {
 	return fmt.Errorf("Unhandled marker: %d", marker)
 }
 
-func (d *Decoder) readArray(vptr interface{}) error {
+func (d *Decoder) ReadArray(vptr interface{}) error {
 	v := reflect.ValueOf(vptr)
 	if v.Kind() != reflect.Ptr {
 		return fmt.Errorf("vptr must be a pointer")
 	}
 	v = v.Elem()
 	if !v.CanSet() {
-		panic("readObject: v must be settable")
+		panic("ReadObject: v must be settable")
 	}
 
-	length, err := d.readUInt29()
+	length, err := d.ReadUInt29()
 	if err != nil {
 		return err
 	}
@@ -186,11 +186,11 @@ func (d *Decoder) readArray(vptr interface{}) error {
 	case reflect.Slice:
 		arrayCappable = true
 	}
-	d.logPrintln("readArray to", v.Type(), "isTypedObject", isTypedObject, "assocCappable", assocCappable, "arrayCappable", arrayCappable)
+	d.logPrintln("ReadArray to", v.Type(), "isTypedObject", isTypedObject, "assocCappable", assocCappable, "arrayCappable", arrayCappable)
 
 readMemberLoop:
 	for {
-		key, err := d.readString()
+		key, err := d.ReadString()
 		switch {
 		case err != nil:
 			return err
@@ -200,7 +200,7 @@ readMemberLoop:
 
 		if isTypedObject {
 			var val interface{}
-			if err := d.readValue(&val); err != nil {
+			if err := d.ReadValue(&val); err != nil {
 				return err
 			}
 			tobj.Assoc[key] = val
@@ -213,7 +213,7 @@ readMemberLoop:
 			if vrefl.Kind() != reflect.Ptr {
 				vrefl = vrefl.Addr()
 			}
-			if err := d.readValue(vrefl.Interface()); err != nil {
+			if err := d.ReadValue(vrefl.Interface()); err != nil {
 				return err
 			}
 			if assocCappable {
@@ -226,7 +226,7 @@ readMemberLoop:
 	for i := 0; i < int(length); i++ {
 		if isTypedObject {
 			var val interface{}
-			if err := d.readValue(&val); err != nil {
+			if err := d.ReadValue(&val); err != nil {
 				return err
 			}
 			tobj.Array = append(tobj.Array, val)
@@ -240,7 +240,7 @@ readMemberLoop:
 			if vrefl.Kind() != reflect.Ptr {
 				vrefl = vrefl.Addr()
 			}
-			if err := d.readValue(vrefl.Interface()); err != nil {
+			if err := d.ReadValue(vrefl.Interface()); err != nil {
 				return err
 			}
 			if arrayCappable {
@@ -253,14 +253,14 @@ readMemberLoop:
 	return nil
 }
 
-func (d *Decoder) readObject(vptr interface{}) error {
+func (d *Decoder) ReadObject(vptr interface{}) error {
 	v := reflect.ValueOf(vptr)
 	if v.Kind() != reflect.Ptr {
 		return fmt.Errorf("vptr must be a pointer")
 	}
 	v = v.Elem()
 
-	ref, err := d.readUInt29()
+	ref, err := d.ReadUInt29()
 	if err != nil {
 		return err
 	}
@@ -293,14 +293,14 @@ func (d *Decoder) readObject(vptr interface{}) error {
 			traits.Nmemb = int(ref >> 4)
 		}
 
-		cls, err := d.readString()
+		cls, err := d.ReadString()
 		if err != nil {
 			return err
 		}
 		traits.ClassName = cls
 
 		for i := 0; i < traits.Nmemb; i++ {
-			key, err := d.readString()
+			key, err := d.ReadString()
 			if err != nil {
 				return err
 			}
@@ -346,10 +346,10 @@ func (d *Decoder) readObject(vptr interface{}) error {
 
 	switch tobj := v.Interface().(type) {
 	case TypedObject:
-		d.logPrintln("readObject: reading into TypedObject")
+		d.logPrintln("ReadObject: reading into TypedObject")
 		for _, key := range traits.Members {
 			var val interface{}
-			if err := d.readValue(&val); err != nil {
+			if err := d.ReadValue(&val); err != nil {
 				return err
 			}
 			d.logPrintln("Read key", key, "value", val)
@@ -359,14 +359,14 @@ func (d *Decoder) readObject(vptr interface{}) error {
 		readDyanmicLoopTO:
 			for {
 				var val interface{}
-				key, err := d.readString()
+				key, err := d.ReadString()
 				switch {
 				case err != nil:
 					return err
 				case len(key) == 0:
 					break readDyanmicLoopTO
 				default:
-					if err := d.readValue(&val); err != nil {
+					if err := d.ReadValue(&val); err != nil {
 						return err
 					}
 					d.logPrintln("Read dynamic key", key, "value", val)
@@ -384,7 +384,7 @@ func (d *Decoder) readObject(vptr interface{}) error {
 		if traits.Dynamic {
 		readDyanmicLoop:
 			for {
-				key, err := d.readString()
+				key, err := d.ReadString()
 				switch {
 				case err != nil:
 					return err
@@ -435,7 +435,7 @@ func (d *Decoder) readObjectField(v reflect.Value, key string) (ignored bool, er
 	} else {
 		field = field.Addr()
 	}
-	err = d.readValue(field.Interface())
+	err = d.ReadValue(field.Interface())
 	d.logPrintln("Read field key", key, "type", field.Type(), "value", field.Elem().Interface())
 	return
 }
@@ -444,7 +444,7 @@ func (d *Decoder) readExternalObject(traits *Traits, vptr interface{}) error {
 	// TODO
 	switch traits.ClassName {
 	case "flex.messaging.io.ArrayCollection":
-		return d.readValue(vptr)
+		return d.ReadValue(vptr)
 	}
 	return fmt.Errorf("External object not implemented: class=%s", traits.ClassName)
 }
