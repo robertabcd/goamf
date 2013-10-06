@@ -21,3 +21,7 @@ func (r *refTable) Reserve() *interface{} {
 	*r = append(*r, nil)
 	return &(*r)[len(*r)-1]
 }
+
+func (r *refTable) Len() int {
+	return len(*r)
+}

@@ -9,7 +9,7 @@ import (
 )
 
 type Decoder struct {
-	UserDefinedTypes map[string]*DefinedType
+	TraitsMapper *TraitsMapper
 
 	reader io.Reader
 
@@ -450,11 +450,11 @@ func (d *Decoder) readExternalObject(traits *Traits, vptr interface{}) error {
 }
 
 func (d *Decoder) createObject(traits *Traits) interface{} {
-	types := userDefinedTypes
-	if d.UserDefinedTypes != nil {
-		types = d.UserDefinedTypes
+	mapper := DefaultTraitsMapper
+	if d.TraitsMapper != nil {
+		mapper = d.TraitsMapper
 	}
-	if dt, ok := types[traits.ClassName]; ok {
+	if dt := mapper.FindByClassName(traits.ClassName); dt != nil {
 		return reflect.New(dt.Type).Interface()
 	}
 	return &TypedObject{

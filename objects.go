@@ -60,9 +60,8 @@ func (t TypedObject) MarshalJSON() ([]byte, error) {
 
 // User-defined type
 type DefinedType struct {
-	ClassName string
-	Type      reflect.Type
-	External  bool
+	Type   reflect.Type
+	Traits *Traits
 }
 
 type Traits struct {
@@ -71,16 +70,58 @@ type Traits struct {
 	Dynamic   bool
 	Nmemb     int
 	Members   []string
+
+	membersMap map[string]bool
+}
+
+func (t *Traits) RebuildMemberMap() {
+	t.membersMap = make(map[string]bool)
+	for _, key := range t.Members {
+		t.membersMap[key] = true
+	}
+}
+
+func (t *Traits) HasMember(key string) bool {
+	if t.membersMap == nil {
+		t.RebuildMemberMap()
+	}
+	_, ok := t.membersMap[key]
+	return ok
+}
+
+type TraitsMapper struct {
+	userDefinedTypes       map[string]*DefinedType
+	reflectTypeToClassName map[reflect.Type]*DefinedType
+}
+
+func NewTraitsMapper() *TraitsMapper {
+	return &TraitsMapper{
+		userDefinedTypes:       make(map[string]*DefinedType),
+		reflectTypeToClassName: make(map[reflect.Type]*DefinedType),
+	}
+}
+
+func (tm *TraitsMapper) RegisterType(t interface{}, traits *Traits) {
+	userType := &DefinedType{
+		Type:   reflect.TypeOf(t),
+		Traits: traits,
+	}
+	tm.userDefinedTypes[traits.ClassName] = userType
+	tm.reflectTypeToClassName[reflect.TypeOf(t)] = userType
+}
+
+func (tm *TraitsMapper) FindByClassName(cls string) *DefinedType {
+	return tm.userDefinedTypes[cls]
+}
+
+func (tm *TraitsMapper) FindByReflectType(tp reflect.Type) *DefinedType {
+	return tm.reflectTypeToClassName[tp]
 }
 
 var (
-	userDefinedTypes = make(map[string]*DefinedType)
+	DefaultTraitsMapper = NewTraitsMapper()
 )
 
-func RegisterType(className string, t interface{}, external bool) {
-	userDefinedTypes[className] = &DefinedType{
-		ClassName: className,
-		Type:      reflect.TypeOf(t),
-		External:  external,
-	}
+func RegisterType(t interface{}, traits *Traits) {
+	DefaultTraitsMapper.RegisterType(t, traits)
 }
