@@ -85,10 +85,8 @@ func RegisterToTraitsMapper(mapper *amf.TraitsMapper) {
 		External:  true,
 	})
 
-	mapper.RegisterType(RemotingMessage{}, &amf.Traits{
-		ClassName: "flex.messaging.messages.RemotingMessage",
-		// TODO: add members
-	})
+	mapper.RegisterType(RemotingMessage{},
+		amf.NewTraits(RemotingMessage{}, "flex.messaging.messages.RemotingMessage", false))
 }
 
 func init() {
@@ -100,7 +98,7 @@ type AbstractMessage struct {
 	Body        interface{}
 	CliendId    UUID
 	Destination string
-	Headers     interface{}
+	Headers     map[string]interface{}
 	MessageId   UUID
 	Timestamp   string
 	TimeToLive  int64
@@ -311,13 +309,13 @@ func (m *CommandMessageExt) ReadExternal(d *amf.Decoder) error {
 
 /* flex.messaging.messages.RemotingMessage */
 type RemotingMessage struct {
-	Source      interface{}
-	Operation   string
-	ClientId    UUID
-	Headers     interface{}
-	Body        interface{}
-	Timestamp   int64
-	TimeToLive  int64
-	Destination string
-	MessageId   UUID
+	Source      interface{} `amf3:"source"`
+	Operation   string      `amf3:"operation"`
+	ClientId    UUID        `amf3:"clientId"`
+	Headers     interface{} `amf3:"headers"`
+	Body        interface{} `amf3:"body"`
+	Timestamp   int64       `amf3:"timestamp"`
+	TimeToLive  int64       `amf3:"timeToLive"`
+	Destination string      `amf3:"destination"`
+	MessageId   UUID        `amf3:"messageId"`
 }

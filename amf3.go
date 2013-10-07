@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"reflect"
-	"strings"
 )
 
 type Decoder struct {
@@ -409,34 +408,56 @@ func (d *Decoder) readObjectField(v reflect.Value, key string) (ignored bool, er
 		panic("readObjectField: v must be settable")
 	}
 
-	lowerCase := strings.ToLower(key)
-	field := v.FieldByNameFunc(func(name string) bool {
-		return strings.ToLower(name) == lowerCase
-	})
+	var field reflect.Value
 
-	if !field.IsValid() {
-		var tmpobj interface{}
-		field = reflect.ValueOf(&tmpobj).Elem()
-		d.logPrintln("Prepared dummy value for non-exist key", key)
-		ignored = true
-	}
-	if !field.CanSet() {
-		d.logPrintln("v.Type()", v.Type())
-		d.logPrintln("field.Type():", field.Type())
-		panic("field not settable")
-	}
-	d.logPrintln("Original field type", field.Type())
-	if field.Kind() == reflect.Ptr {
-		if field.IsNil() {
-			if err = createReflectObject(field, field.Type().Elem()); err != nil {
-				return
-			}
+	switch v.Kind() {
+	case reflect.Map:
+		if v.IsNil() {
+			v.Set(reflect.MakeMap(v.Type()))
 		}
-	} else {
-		field = field.Addr()
+		elemType := v.Type().Elem()
+		if elemType.Kind() == reflect.Ptr {
+			field = reflect.New(elemType.Elem())
+		} else {
+			field = reflect.New(elemType)
+		}
+
+	default:
+		field = findFieldByName(v, key)
+
+		if !field.IsValid() {
+			var tmpobj interface{}
+			field = reflect.ValueOf(&tmpobj).Elem()
+			d.logPrintln("Prepared dummy value for non-exist key", key)
+			ignored = true
+		}
+		if !field.CanSet() {
+			d.logPrintln("v.Type()", v.Type())
+			d.logPrintln("field.Type():", field.Type())
+			panic("field not settable")
+		}
+		d.logPrintln("Original field type", field.Type())
+		if field.Kind() == reflect.Ptr {
+			if field.IsNil() {
+				if err = createReflectObject(field, field.Type().Elem()); err != nil {
+					return
+				}
+			}
+		} else {
+			field = field.Addr()
+		}
 	}
+
 	err = d.ReadValue(field.Interface())
 	d.logPrintln("Read field key", key, "type", field.Type(), "value", field.Elem().Interface())
+
+	if v.Kind() == reflect.Map {
+		if v.Type().Elem().Kind() != reflect.Ptr {
+			field = field.Elem()
+		}
+		v.SetMapIndex(reflect.ValueOf(key), field)
+	}
+
 	return
 }
 
@@ -464,5 +485,5 @@ func (d *Decoder) createObject(traits *Traits) interface{} {
 }
 
 func (d *Decoder) logPrintln(objs ...interface{}) {
-	//fmt.Println(objs...)
+	fmt.Println(objs...)
 }

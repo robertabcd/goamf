@@ -1,7 +1,7 @@
 package amf
 
 import (
-	"errors"
+	"fmt"
 )
 
 type refTable []interface{}
@@ -10,7 +10,7 @@ func (r *refTable) Get(i int) (interface{}, error) {
 	if i >= 0 && i < len(*r) {
 		return (*r)[i], nil
 	}
-	return nil, errors.New("refTable index out-of-bounds")
+	return nil, fmt.Errorf("refTable index out-of-bounds: %d, len: %d", i, len(*r))
 }
 
 func (r *refTable) Add(v interface{}) {

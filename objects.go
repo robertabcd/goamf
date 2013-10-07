@@ -74,6 +74,26 @@ type Traits struct {
 	membersMap map[string]bool
 }
 
+func NewTraits(v interface{}, cls string, dynamic bool) *Traits {
+	memberIdx, _ := getStructMembersAndDynamics(reflect.ValueOf(v))
+	members := make([]string, len(memberIdx))
+	t := reflect.TypeOf(v)
+	for i, idx := range memberIdx {
+		sf := t.Field(idx)
+		name := sf.Tag.Get("amf3")
+		if name == "" {
+			name = sf.Name
+		}
+		members[i] = name
+	}
+	return &Traits{
+		ClassName: cls,
+		Nmemb:     len(members),
+		Members:   members,
+		Dynamic:   dynamic,
+	}
+}
+
 func (t *Traits) RebuildMemberMap() {
 	t.membersMap = make(map[string]bool)
 	for _, key := range t.Members {
@@ -106,7 +126,9 @@ func (tm *TraitsMapper) RegisterType(t interface{}, traits *Traits) {
 		Type:   reflect.TypeOf(t),
 		Traits: traits,
 	}
-	tm.userDefinedTypes[traits.ClassName] = userType
+	if traits.ClassName != "" {
+		tm.userDefinedTypes[traits.ClassName] = userType
+	}
 	tm.reflectTypeToClassName[reflect.TypeOf(t)] = userType
 }
 

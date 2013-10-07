@@ -3,6 +3,7 @@ package amf
 import (
 	"fmt"
 	"reflect"
+	"strings"
 )
 
 func setReflectValue(dst reflect.Value, srcif interface{}) error {
@@ -58,6 +59,39 @@ func reflectResolveType(dstKind reflect.Kind, src reflect.Value) reflect.Value {
 	default:
 		return src
 	}
+}
+
+func findFieldByName(v reflect.Value, name string) reflect.Value {
+	name = strings.ToLower(name)
+	tp := v.Type()
+	for i, n := 0, tp.NumField(); i < n; i++ {
+		sf := tp.Field(i)
+		if sf.PkgPath != "" {
+			continue
+		}
+		if strings.ToLower(sf.Name) == name || sf.Tag.Get("amf3") == name {
+			return v.Field(i)
+		}
+	}
+	return reflect.ValueOf(nil)
+}
+
+func getStructMembersAndDynamics(v reflect.Value) (members []int, dynamics []int) {
+	members = make([]int, 0, 0)
+	dynamics = make([]int, 0, 0)
+	tp := v.Type()
+	for i, n := 0, tp.NumField(); i < n; i++ {
+		sf := tp.Field(i)
+		if sf.PkgPath != "" {
+			continue
+		}
+		if sf.Tag.Get("amf3_dynamic") == "" {
+			members = append(members, i)
+		} else {
+			dynamics = append(dynamics, i)
+		}
+	}
+	return
 }
 
 func assignOrSetReflectValue(dst reflect.Value, src reflect.Value) error {

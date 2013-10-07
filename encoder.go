@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"reflect"
-	"strings"
 )
 
 type Encoder struct {
@@ -112,7 +111,7 @@ func (e *Encoder) WriteValue(vif interface{}) error {
 			return e.writeMarker(MarkerFalse)
 		}
 
-	case reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		i := v.Int()
 		if i < minInt29 || i > maxInt29 {
 			return e.WriteValue(float64(i))
@@ -122,7 +121,7 @@ func (e *Encoder) WriteValue(vif interface{}) error {
 		}
 		return e.WriteUInt29(uint32(i & maxUInt29))
 
-	case reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		i := v.Uint()
 		if i > uint64(maxInt29) {
 			return e.WriteValue(float64(i))
@@ -151,10 +150,13 @@ func (e *Encoder) WriteValue(vif interface{}) error {
 		panic("TODO") // TODO
 
 	case reflect.Struct:
-		panic("TODO") // TODO
+		if err := e.writeMarker(MarkerObject); err != nil {
+			return err
+		}
+		return e.WriteObject(vif)
 
 	default:
-		return fmt.Errorf("Unhandled kind:", v.Kind())
+		return fmt.Errorf("Unhandled kind: %v", v.Kind())
 	}
 	panic("Not reached")
 }
@@ -230,10 +232,7 @@ func (e *Encoder) WriteObject(vif interface{}) error {
 
 	default:
 		for _, key := range traits.Members {
-			lowerCasedKey := strings.ToLower(key)
-			field := v.FieldByNameFunc(func(name string) bool {
-				return strings.ToLower(name) == lowerCasedKey
-			})
+			field := findFieldByName(v, key)
 
 			var fif interface{} = nil
 			if field.IsValid() {
@@ -255,7 +254,7 @@ func (e *Encoder) WriteObject(vif interface{}) error {
 						continue
 					}
 
-					if traits.HasMember(sf.Name) {
+					if sf.Tag.Get("amf3_dynamic") == "" {
 						continue
 					}
 
@@ -286,10 +285,10 @@ func (e *Encoder) writeTraits(traits *Traits) error {
 	e.traitsRefsMap[traits.ClassName] = e.traitsRefs.Len()
 	e.traitsRefs.Add(traits)
 
-	ref := uint32(0)
+	ref := uint32(3)
 
 	if traits.External {
-		ref |= 0x7
+		ref |= 0x4
 	} else {
 		if traits.Dynamic {
 			ref |= 0x8
