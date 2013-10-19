@@ -76,6 +76,15 @@ func NewUUID() *UUID {
 	return &uuid
 }
 
+func (u UUID) String() string {
+	return string(u)
+}
+
+func UUIDFromString(s string) *UUID {
+	u := UUID(s)
+	return &u
+}
+
 func readAndCheckError(d *amf.Decoder, flag uint8, args ...interface{}) error {
 	for i := 0; i < len(args); i += 2 {
 		f := args[i].(uint8)
