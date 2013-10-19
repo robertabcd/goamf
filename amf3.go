@@ -333,6 +333,7 @@ func (d *Decoder) ReadObject(vptr interface{}) error {
 
 	d.objectRefs.Add(v.Interface())
 
+	d.logPrintln("Object Traits", traits)
 	// Handle external object
 	if traits.External {
 		refobj := d.objectRefs.Reserve()
@@ -485,5 +486,5 @@ func (d *Decoder) createObject(traits *Traits) interface{} {
 }
 
 func (d *Decoder) logPrintln(objs ...interface{}) {
-	fmt.Println(objs...)
+	//fmt.Println(objs...)
 }

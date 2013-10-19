@@ -8,6 +8,10 @@ import (
 	"reflect"
 )
 
+type Externalizable interface {
+	WriteExternal(e *Encoder) error
+}
+
 type Encoder struct {
 	TraitsMapper *TraitsMapper
 
@@ -71,13 +75,16 @@ func (e *Encoder) WriteString(str string) error {
 	// Only non-empty strings are put into ref table
 	if len(str) > 0 {
 		if ref, ok := e.stringRefMap[str]; ok {
+			e.logPrintln("WriteString using ref", ref)
 			return e.WriteUInt29(uint32(ref << 1))
 		}
 
+		e.logPrintln("Add string to ref table", "ref", e.stringRefs.Len(), str)
 		e.stringRefMap[str] = e.stringRefs.Len()
 		e.stringRefs.Add(str)
 	}
 
+	e.logPrintln("Write string to buffer", "len", len(str), str)
 	if err := e.WriteUInt29(uint32(len(str)<<1) | 0x1); err != nil {
 		return err
 	}
@@ -144,7 +151,10 @@ func (e *Encoder) WriteValue(vif interface{}) error {
 		return e.WriteString(v.String())
 
 	case reflect.Slice:
-		panic("TODO") // TODO
+		if err := e.writeMarker(MarkerArray); err != nil {
+			return err
+		}
+		return e.WriteArray(vif)
 
 	case reflect.Map:
 		panic("TODO") // TODO
@@ -179,9 +189,13 @@ func (e *Encoder) WriteArray(vif interface{}) error {
 	}
 
 	// Member is not supported.
+	if err := e.WriteString(""); err != nil {
+		return err
+	}
 
 	// Dense part
 	for _, el := range sl {
+		e.logPrintln("ARRAY write element", el)
 		if err := e.WriteValue(el); err != nil {
 			return err
 		}
@@ -202,6 +216,7 @@ func (e *Encoder) WriteObject(vif interface{}) error {
 	traits, ref := e.getReflectTraits(v)
 	if traits == nil {
 		// TODO
+		e.logPrintln("No traits for type", v.Type())
 		panic("TODO")
 	}
 	if ref >= 0 {
@@ -222,7 +237,11 @@ func (e *Encoder) WriteObject(vif interface{}) error {
 
 	// Handle external object
 	if traits.External {
-		return errors.New("External objects are not supported")
+		if encobj, ok := v.Addr().Interface().(Externalizable); ok {
+			return encobj.WriteExternal(e)
+		} else {
+			return errors.New("Object is not externalizable")
+		}
 	}
 
 	switch v.Interface().(type) {
@@ -282,8 +301,10 @@ func (e *Encoder) WriteObject(vif interface{}) error {
 }
 
 func (e *Encoder) writeTraits(traits *Traits) error {
-	e.traitsRefsMap[traits.ClassName] = e.traitsRefs.Len()
-	e.traitsRefs.Add(traits)
+	if len(traits.ClassName) > 0 {
+		e.traitsRefsMap[traits.ClassName] = e.traitsRefs.Len()
+		e.traitsRefs.Add(traits)
+	}
 
 	ref := uint32(3)
 
@@ -294,13 +315,16 @@ func (e *Encoder) writeTraits(traits *Traits) error {
 			ref |= 0x8
 		}
 		ref |= uint32(traits.Nmemb) << 4
+	}
 
-		if err := e.WriteUInt29(ref); err != nil {
-			return err
-		}
-		if err := e.WriteString(traits.ClassName); err != nil {
-			return err
-		}
+	if err := e.WriteUInt29(ref); err != nil {
+		return err
+	}
+	if err := e.WriteString(traits.ClassName); err != nil {
+		return err
+	}
+
+	if !traits.External {
 		for i := 0; i < traits.Nmemb; i++ {
 			if err := e.WriteString(traits.Members[i]); err != nil {
 				return err
@@ -325,4 +349,8 @@ func (e *Encoder) getReflectTraits(v reflect.Value) (traits *Traits, ref int) {
 	} else {
 		return dt.Traits, -1
 	}
+}
+
+func (e *Encoder) logPrintln(objs ...interface{}) {
+	//fmt.Println(objs...)
 }

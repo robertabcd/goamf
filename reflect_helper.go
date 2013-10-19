@@ -72,151 +72,39 @@ func findFieldByName(v reflect.Value, name string) reflect.Value {
 		if strings.ToLower(sf.Name) == name || sf.Tag.Get("amf3") == name {
 			return v.Field(i)
 		}
+		if sf.Anonymous {
+			if field := findFieldByName(v.Field(i), name); field.IsValid() {
+				return field
+			}
+		}
 	}
 	return reflect.ValueOf(nil)
 }
 
-func getStructMembersAndDynamics(v reflect.Value) (members []int, dynamics []int) {
-	members = make([]int, 0, 0)
-	dynamics = make([]int, 0, 0)
+func getStructMembersAndDynamics(v reflect.Value) (members []string, dynamics []string) {
+	return appendStructMembersAndDynamics(v, nil, nil)
+}
+
+func appendStructMembersAndDynamics(v reflect.Value, members []string, dynamics []string) ([]string, []string) {
 	tp := v.Type()
 	for i, n := 0, tp.NumField(); i < n; i++ {
 		sf := tp.Field(i)
 		if sf.PkgPath != "" {
 			continue
 		}
-		if sf.Tag.Get("amf3_dynamic") == "" {
-			members = append(members, i)
+		if sf.Anonymous {
+			members, dynamics = appendStructMembersAndDynamics(v.Field(i), members, dynamics)
 		} else {
-			dynamics = append(dynamics, i)
-		}
-	}
-	return
-}
-
-func assignOrSetReflectValue(dst reflect.Value, src reflect.Value) error {
-	switch dst.Kind() {
-	case reflect.Ptr, reflect.Interface:
-		switch src.Kind() {
-		case reflect.Ptr:
-			return directAssignOrSetReflectValue(dst, src)
-		default:
-			if src.CanAddr() {
-				return directAssignOrSetReflectValue(dst, src.Addr())
+			name := sf.Tag.Get("amf3")
+			if name == "" {
+				name = sf.Name
+			}
+			if sf.Tag.Get("amf3_dynamic") == "" {
+				members = append(members, name)
 			} else {
-				return directAssignOrSetReflectValue(dst, src)
+				dynamics = append(dynamics, name)
 			}
 		}
-	default:
-		switch src.Kind() {
-		case reflect.Ptr:
-			return directAssignOrSetReflectValue(dst, src.Elem())
-		default:
-			return directAssignOrSetReflectValue(dst, src)
-		}
 	}
-}
-
-func directAssignOrSetReflectValue(dst reflect.Value, src reflect.Value) error {
-	if !dst.CanSet() {
-		panic("dst is not settable")
-		//return errors.New("dst is not settable")
-	}
-	if !src.Type().AssignableTo(dst.Type()) {
-		if src.Type().ConvertibleTo(dst.Type()) {
-			src = src.Convert(dst.Type())
-		} else if _, ok := src.Interface().(AMF3Null); ok {
-			dst.Set(reflect.New(dst.Type()).Elem())
-			return nil
-		} else {
-			return fmt.Errorf("Cannot set type %s to %s", src.Kind(), dst.Kind())
-		}
-	}
-	dst.Set(src)
-	return nil
-}
-
-func assignOrSetReflectAnyPtr(dst reflect.Value, srcptr interface{}) error {
-	return assignOrSetReflectValue(dst, reflect.ValueOf(srcptr))
-}
-
-func resolveReflectPtrs(v reflect.Value) reflect.Value {
-	for v.Kind() == reflect.Ptr {
-		if !v.Elem().IsValid() {
-			return v
-		}
-		v = v.Elem()
-	}
-	return v
-}
-
-func resolveReflectPtrAndInterfaces(v reflect.Value) reflect.Value {
-	for {
-		switch v.Kind() {
-		case reflect.Ptr:
-			if !v.Elem().IsValid() {
-				return v
-			}
-		case reflect.Interface:
-			if v.IsNil() {
-				return v
-			}
-		default:
-			return v
-		}
-		v = v.Elem()
-	}
-}
-
-//func setReflectValue(v reflect.Value, newv reflect.Value) error {
-//	if v.IsValid() {
-//		switch v.Kind() {
-//		case reflect.Ptr:
-//			if newv.Kind() != reflect.Ptr && newv.CanAddr() {
-//				newv = newv.Addr()
-//			}
-//		default:
-//			if newv.Kind() == reflect.Ptr {
-//				newv = newv.Elem()
-//			}
-//		}
-//		assignOrSetReflectValue(v, newv)
-//	} else {
-//		v.Set(newv)
-//	}
-//	return nil
-//}
-
-// v must be a settable slice or interface.
-// if v is a interface, underlying type must be a slice.
-// if v is []*T, elem must be either *T or addressable value of T.
-// if v is []T, elem must be either *T or T.
-func appendReflect(v reflect.Value, elem reflect.Value) error {
-	if !v.CanSet() {
-		return fmt.Errorf("v(Type %v) is not settable", v.Type())
-	}
-	sv := v
-	if sv.Kind() == reflect.Interface {
-		sv = v.Elem()
-	}
-	if sv.Kind() != reflect.Slice {
-		return fmt.Errorf("type %s cannot be appended to", v.Kind())
-	}
-	switch sv.Type().Elem().Kind() {
-	case reflect.Ptr:
-		if elem.Kind() == reflect.Ptr {
-			v.Set(reflect.Append(sv, elem))
-		} else if elem.CanAddr() {
-			v.Set(reflect.Append(sv, elem.Addr()))
-		} else {
-			return fmt.Errorf("elem is not a addressable value")
-		}
-	default:
-		if elem.Kind() == reflect.Ptr {
-			v.Set(reflect.Append(sv, elem.Elem()))
-		} else {
-			v.Set(reflect.Append(sv, elem))
-		}
-	}
-	return nil
+	return members, dynamics
 }

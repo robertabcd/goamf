@@ -2,6 +2,9 @@ package flex
 
 import (
 	"amf"
+	"fmt"
+	"math/rand"
+	"reflect"
 )
 
 type Flags struct {
@@ -15,8 +18,20 @@ func (f *Flags) ReadExternal(d *amf.Decoder) error {
 			return err
 		}
 		f.flags = append(f.flags, b&0x7F)
-		if b&0x80 == 0x80 {
+		if b&0x80 != 0x80 {
 			break
+		}
+	}
+	return nil
+}
+
+func (f *Flags) WriteExternal(e *amf.Encoder) error {
+	for i, b := range f.flags {
+		if i < len(f.flags)-1 {
+			b |= 0x80
+		}
+		if err := e.WriteUInt8(b); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -40,20 +55,71 @@ func (f *Flags) CountBits() (count int) {
 	return
 }
 
+func (f *Flags) Init(length int) {
+	f.flags = make([]uint8, length)
+}
+
+func (f *Flags) Set(i int, bitmask uint8) {
+	f.flags[i] |= bitmask
+}
+
 type UUID string
 
-func readAndCheckError(d *amf.Decoder, flag uint8, args ...interface{}) (parsed int, err error) {
+func NewUUID() *UUID {
+	uuid := UUID(fmt.Sprintf("%08X-%04X-%04X-%04X-%04X%08X",
+		rand.Uint32(),
+		rand.Uint32()&0xFFFF,
+		rand.Uint32()&0xFFFF,
+		rand.Uint32()&0xFFFF,
+		rand.Uint32()&0xFFFF,
+		rand.Uint32()))
+	return &uuid
+}
+
+func readAndCheckError(d *amf.Decoder, flag uint8, args ...interface{}) error {
 	for i := 0; i < len(args); i += 2 {
 		f := args[i].(uint8)
 		if flag&f != f {
 			continue
 		}
-		if err = d.ReadValue(args[i+1]); err != nil {
-			return
+		if err := d.ReadValue(args[i+1]); err != nil {
+			return err
 		}
-		parsed++
 	}
-	return
+	for remaining := flag >> uint(len(args)/2); remaining > 0; remaining >>= 1 {
+		if remaining&1 == 1 {
+			var dummy interface{}
+			if err := d.ReadValue(&dummy); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func writeAndCheckError(e *amf.Encoder, flag uint8, args ...interface{}) error {
+	for i := 0; i < len(args); i += 2 {
+		f := args[i].(uint8)
+		if flag&f != f {
+			continue
+		}
+		if err := e.WriteValue(args[i+1]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func setFlags(idx int, fl *Flags, args ...interface{}) {
+	for i := 0; i < len(args); i += 2 {
+		v := reflect.ValueOf(args[i+1])
+		for v.IsValid() && (v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface) {
+			v = v.Elem()
+		}
+		if v.IsValid() {
+			fl.Set(idx, args[i].(uint8))
+		}
+	}
 }
 
 /* Registration */
@@ -62,29 +128,22 @@ func RegisterToTraitsMapper(mapper *amf.TraitsMapper) {
 		ClassName: "DSA",
 		External:  true,
 	})
-	mapper.RegisterType(AsyncMessageExt{}, &amf.Traits{
-		ClassName: "flex.messaging.messages.AsyncMessageExt",
-		External:  true,
-	})
-
 	mapper.RegisterType(AcknowledgeMessageExt{}, &amf.Traits{
 		ClassName: "DSK",
 		External:  true,
 	})
-	mapper.RegisterType(AcknowledgeMessageExt{}, &amf.Traits{
-		ClassName: "flex.messaging.messages.AcknowledgeMessageExt",
-		External:  true,
-	})
-
 	mapper.RegisterType(CommandMessageExt{}, &amf.Traits{
 		ClassName: "DSC",
 		External:  true,
 	})
-	mapper.RegisterType(CommandMessageExt{}, &amf.Traits{
-		ClassName: "flex.messaging.messages.CommandMessageExt",
-		External:  true,
-	})
-
+	mapper.RegisterType(AsyncMessage{},
+		amf.NewTraits(AsyncMessage{}, "flex.messaging.messages.AsyncMessage", false))
+	mapper.RegisterType(AcknowledgeMessage{},
+		amf.NewTraits(AcknowledgeMessage{}, "flex.messaging.messages.AcknowledgeMessage", false))
+	mapper.RegisterType(CommandMessage{},
+		amf.NewTraits(CommandMessage{}, "flex.messaging.messages.CommandMessage", false))
+	mapper.RegisterType(ErrorMessage{},
+		amf.NewTraits(ErrorMessage{}, "flex.messaging.messages.ErrorMessage", false))
 	mapper.RegisterType(RemotingMessage{},
 		amf.NewTraits(RemotingMessage{}, "flex.messaging.messages.RemotingMessage", false))
 }
@@ -95,13 +154,13 @@ func init() {
 
 /* AbstractMessage */
 type AbstractMessage struct {
-	Body        interface{}
-	CliendId    UUID
-	Destination string
-	Headers     map[string]interface{}
-	MessageId   UUID
-	Timestamp   string
-	TimeToLive  int64
+	Body        interface{} `amf3:"body"`
+	CliendId    *UUID       `amf3:"clientId"`
+	Destination *string     `amf3:"destination"`
+	Headers     interface{} `amf3:"headers"`
+	MessageId   *UUID       `amf3:"messageId"`
+	Timestamp   *int64      `amf3:"timestamp"`
+	TimeToLive  *int64      `amf3:"timeToLive"`
 
 	flags Flags
 }
@@ -123,41 +182,35 @@ const (
 	AbstractMessage_MessageIdBytes
 )
 
+func (m *AbstractMessage) flagData0() []interface{} {
+	return []interface{}{
+		AbstractMessage_Body, &m.Body,
+		AbstractMessage_ClientId, &m.CliendId,
+		AbstractMessage_Destination, &m.Destination,
+		AbstractMessage_Headers, &m.Headers,
+		AbstractMessage_MessageId, &m.MessageId,
+		AbstractMessage_Timestamp, &m.Timestamp,
+		AbstractMessage_TimeToLive, &m.TimeToLive,
+	}
+}
+
 func (m *AbstractMessage) ReadExternal(d *amf.Decoder) error {
 	if err := m.flags.ReadExternal(d); err != nil {
 		return err
 	}
 
-	totalParsed := 0
 	nflags := m.flags.Len()
 	if nflags > 0 {
-		if parsed, err := readAndCheckError(d, m.flags.At(0),
-			AbstractMessage_Body, &m.Body,
-			AbstractMessage_ClientId, &m.CliendId,
-			AbstractMessage_Destination, &m.Destination,
-			AbstractMessage_Headers, &m.Headers,
-			AbstractMessage_MessageId, &m.MessageId,
-			AbstractMessage_Timestamp, &m.Timestamp,
-			AbstractMessage_TimeToLive, &m.TimeToLive); err != nil {
+		if err := readAndCheckError(d, m.flags.At(0), m.flagData0()...); err != nil {
 			return err
-		} else {
-			totalParsed += parsed
 		}
 	}
 	if nflags > 1 {
 		// TODO: convert it to UUID
 		var dummy0, dummy1 interface{}
-		if parsed, err := readAndCheckError(d, m.flags.At(1),
+		if err := readAndCheckError(d, m.flags.At(1),
 			AbstractMessage_ClientIdBytes, &dummy0,
 			AbstractMessage_MessageIdBytes, &dummy1); err != nil {
-			return err
-		} else {
-			totalParsed += parsed
-		}
-	}
-	for i := m.flags.CountBits() - totalParsed; i > 0; i-- {
-		var dummy interface{}
-		if err := d.ReadValue(&dummy); err != nil {
 			return err
 		}
 	}
@@ -165,10 +218,20 @@ func (m *AbstractMessage) ReadExternal(d *amf.Decoder) error {
 	return nil
 }
 
+func (m *AbstractMessage) WriteExternal(e *amf.Encoder) error {
+	fd0 := m.flagData0()
+	m.flags.Init(2)
+	setFlags(0, &m.flags, fd0...)
+	if err := m.flags.WriteExternal(e); err != nil {
+		return err
+	}
+	return writeAndCheckError(e, m.flags.At(0), fd0...)
+}
+
 /* AsyncMessage */
 type AsyncMessage struct {
 	AbstractMessage
-	CorrelationId UUID
+	CorrelationId *UUID `amf3:"correlationId"`
 
 	flags Flags
 }
@@ -187,25 +250,28 @@ func (m *AsyncMessage) ReadExternal(d *amf.Decoder) error {
 		return err
 	}
 
-	totalParsed := 0
 	nflags := m.flags.Len()
 	if nflags > 0 {
 		var dummy0 interface{}
-		if parsed, err := readAndCheckError(d, m.flags.At(0),
+		if err := readAndCheckError(d, m.flags.At(0),
 			AsyncMessage_CorrelationId, &m.CorrelationId,
 			AsyncMessage_CorrelationIdBytes, &dummy0); err != nil { // TODO: convert it to UUID
-			return err
-		} else {
-			totalParsed += parsed
-		}
-	}
-	for i := m.flags.CountBits() - totalParsed; i > 0; i-- {
-		var dummy interface{}
-		if err := d.ReadValue(&dummy); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (m *AsyncMessage) WriteExternal(e *amf.Encoder) error {
+	if err := m.AbstractMessage.WriteExternal(e); err != nil {
+		return err
+	}
+	m.flags.Init(1)
+	m.flags.Set(0, AsyncMessage_CorrelationId)
+	if err := m.flags.WriteExternal(e); err != nil {
+		return err
+	}
+	return writeAndCheckError(e, m.flags.At(0), AsyncMessage_CorrelationId, m.CorrelationId)
 }
 
 /* DSA, flex.messaging.messages.AsyncMessageExt */
@@ -215,6 +281,10 @@ type AsyncMessageExt struct {
 
 func (m *AsyncMessageExt) ReadExternal(d *amf.Decoder) error {
 	return m.AsyncMessage.ReadExternal(d)
+}
+
+func (m *AsyncMessageExt) WriteExternal(e *amf.Encoder) error {
+	return m.AsyncMessage.WriteExternal(e)
 }
 
 /* AcknowledgeMessage */
@@ -241,7 +311,15 @@ func (m *AcknowledgeMessage) ReadExternal(d *amf.Decoder) error {
 	return nil
 }
 
-/* DSK, flex.messaging.messages.AcknowledgeMessageEx */
+func (m *AcknowledgeMessage) WriteExternal(e *amf.Encoder) error {
+	if err := m.AsyncMessage.WriteExternal(e); err != nil {
+		return nil
+	}
+	m.flags.Init(1)
+	return m.flags.WriteExternal(e)
+}
+
+/* DSK, flex.messaging.messages.AcknowledgeMessageExt */
 type AcknowledgeMessageExt struct {
 	AcknowledgeMessage
 }
@@ -250,18 +328,31 @@ func (m *AcknowledgeMessageExt) ReadExternal(d *amf.Decoder) error {
 	return m.AcknowledgeMessage.ReadExternal(d)
 }
 
+func (m *AcknowledgeMessageExt) WriteExternal(e *amf.Encoder) error {
+	return m.AcknowledgeMessage.WriteExternal(e)
+}
+
 type ErrorMessage struct {
 	AcknowledgeMessage
+	FaultCode    *string     `amf3:"faultCode"`
+	FaultDetail  *string     `amf3:"faultDetail"`
+	FaultString  *string     `amf3:"faultString"`
+	RootCause    interface{} `amf3:"rootCause"`
+	ExtendedData interface{} `amf3:"extendedData"`
 }
 
 func (m *ErrorMessage) ReadExternal(d *amf.Decoder) error {
 	return m.AcknowledgeMessage.ReadExternal(d)
 }
 
+func (m *ErrorMessage) WriteExternal(e *amf.Encoder) error {
+	return m.AcknowledgeMessage.WriteExternal(e)
+}
+
 /* CommandMessage */
 type CommandMessage struct {
 	AsyncMessage
-	Operation string
+	Operation *int32 `amf3:"operation"`
 
 	flags Flags
 }
@@ -279,23 +370,26 @@ func (m *CommandMessage) ReadExternal(d *amf.Decoder) error {
 		return err
 	}
 
-	totalParsed := 0
 	nflags := m.flags.Len()
 	if nflags > 0 {
-		if parsed, err := readAndCheckError(d, m.flags.At(0),
+		if err := readAndCheckError(d, m.flags.At(0),
 			CommandMessage_Operation, &m.Operation); err != nil {
-			return err
-		} else {
-			totalParsed += parsed
-		}
-	}
-	for i := m.flags.CountBits() - totalParsed; i > 0; i-- {
-		var dummy interface{}
-		if err := d.ReadValue(&dummy); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (m *CommandMessage) WriteExternal(e *amf.Encoder) error {
+	if err := m.AsyncMessage.WriteExternal(e); err != nil {
+		return err
+	}
+	m.flags.Init(1)
+	m.flags.Set(0, CommandMessage_Operation)
+	if err := m.flags.WriteExternal(e); err != nil {
+		return err
+	}
+	return writeAndCheckError(e, m.flags.At(0), CommandMessage_Operation, m.Operation)
 }
 
 /* DSC, flex.messaging.messages.CommandMessageExt */
@@ -307,15 +401,13 @@ func (m *CommandMessageExt) ReadExternal(d *amf.Decoder) error {
 	return m.CommandMessage.ReadExternal(d)
 }
 
+func (m *CommandMessageExt) WriteExternal(e *amf.Encoder) error {
+	return m.CommandMessage.WriteExternal(e)
+}
+
 /* flex.messaging.messages.RemotingMessage */
 type RemotingMessage struct {
-	Source      interface{} `amf3:"source"`
-	Operation   string      `amf3:"operation"`
-	ClientId    UUID        `amf3:"clientId"`
-	Headers     interface{} `amf3:"headers"`
-	Body        interface{} `amf3:"body"`
-	Timestamp   int64       `amf3:"timestamp"`
-	TimeToLive  int64       `amf3:"timeToLive"`
-	Destination string      `amf3:"destination"`
-	MessageId   UUID        `amf3:"messageId"`
+	AbstractMessage
+	Source    interface{} `amf3:"source"`
+	Operation *string     `amf3:"operation"`
 }

@@ -75,17 +75,7 @@ type Traits struct {
 }
 
 func NewTraits(v interface{}, cls string, dynamic bool) *Traits {
-	memberIdx, _ := getStructMembersAndDynamics(reflect.ValueOf(v))
-	members := make([]string, len(memberIdx))
-	t := reflect.TypeOf(v)
-	for i, idx := range memberIdx {
-		sf := t.Field(idx)
-		name := sf.Tag.Get("amf3")
-		if name == "" {
-			name = sf.Name
-		}
-		members[i] = name
-	}
+	members, _ := getStructMembersAndDynamics(reflect.ValueOf(v))
 	return &Traits{
 		ClassName: cls,
 		Nmemb:     len(members),
