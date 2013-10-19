@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"time"
 )
 
 type Decoder struct {
@@ -141,13 +142,31 @@ func (d *Decoder) ReadValue(vptr interface{}) error {
 			return err
 		}
 		return setReflectValue(v, str)
+	case MarkerDate:
+		ref, err := d.ReadUInt29()
+		if err != nil {
+			return err
+		}
+		if ref&1 == 0 {
+			if val, err := d.objectRefs.Get(int(ref >> 1)); err != nil {
+				return err
+			} else {
+				return setReflectValue(v, val)
+			}
+		} else {
+			var f float64
+			if err := binary.Read(d.reader, binary.BigEndian, &f); err != nil {
+				return err
+			}
+			t := time.Unix(int64(f), 0)
+			d.objectRefs.Add(t)
+			return setReflectValue(v, t)
+		}
 	case MarkerXMLDoc:
 		// TODO
 	case MarkerXML:
 		// TODO
 	case MarkerByteArray:
-		// TODO
-	case MarkerDate:
 		// TODO
 	}
 
