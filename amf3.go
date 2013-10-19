@@ -17,6 +17,10 @@ type Decoder struct {
 	traitsRefs refTable
 }
 
+type ExternalizeReadable interface {
+	ReadExternal(d *Decoder) error
+}
+
 func NewDecoder(reader io.Reader) *Decoder {
 	return &Decoder{
 		reader: reader,
@@ -25,6 +29,10 @@ func NewDecoder(reader io.Reader) *Decoder {
 
 func (d *Decoder) Decode(objptr interface{}) error {
 	return d.ReadValue(objptr)
+}
+
+func (d *Decoder) GetReader() io.Reader {
+	return d.reader
 }
 
 func (d *Decoder) ReadUInt8() (uint8, error) {
@@ -312,7 +320,7 @@ func (d *Decoder) ReadObject(vptr interface{}) error {
 	switch v.Kind() {
 	case reflect.Interface, reflect.Ptr:
 		if v.IsNil() {
-			if err := setReflectValue(v, d.createObject(traits)); err != nil {
+			if err := setReflectValue(v, d.createObject(traits.ClassName)); err != nil {
 				return err
 			}
 			if v.Kind() == reflect.Interface {
@@ -463,20 +471,23 @@ func (d *Decoder) readObjectField(v reflect.Value, key string) (ignored bool, er
 }
 
 func (d *Decoder) readExternalObject(traits *Traits, vptr interface{}) error {
-	// TODO
 	switch traits.ClassName {
 	case "flex.messaging.io.ArrayCollection":
 		return d.ReadValue(vptr)
 	}
+	obj := d.createObject(traits.ClassName)
+	if extobj, ok := obj.(ExternalizeReadable); ok {
+		return extobj.ReadExternal(d)
+	}
 	return fmt.Errorf("External object not implemented: class=%s", traits.ClassName)
 }
 
-func (d *Decoder) createObject(traits *Traits) interface{} {
+func (d *Decoder) createObject(className string) interface{} {
 	mapper := DefaultTraitsMapper
 	if d.TraitsMapper != nil {
 		mapper = d.TraitsMapper
 	}
-	if dt := mapper.FindByClassName(traits.ClassName); dt != nil {
+	if dt := mapper.FindByClassName(className); dt != nil {
 		return reflect.New(dt.Type).Interface()
 	}
 	return &TypedObject{

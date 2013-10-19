@@ -8,7 +8,7 @@ import (
 	"reflect"
 )
 
-type Externalizable interface {
+type ExternalizeWritable interface {
 	WriteExternal(e *Encoder) error
 }
 
@@ -237,7 +237,7 @@ func (e *Encoder) WriteObject(vif interface{}) error {
 
 	// Handle external object
 	if traits.External {
-		if encobj, ok := v.Addr().Interface().(Externalizable); ok {
+		if encobj, ok := v.Addr().Interface().(ExternalizeWritable); ok {
 			return encobj.WriteExternal(e)
 		} else {
 			return errors.New("Object is not externalizable")
