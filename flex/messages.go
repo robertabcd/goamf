@@ -165,6 +165,10 @@ type AbstractMessage struct {
 	flags Flags
 }
 
+func (m *AbstractMessage) GetAbstractMessage() *AbstractMessage {
+	return m
+}
+
 // Flag byte 1
 const (
 	AbstractMessage_Body uint8 = 1 << iota
@@ -236,6 +240,10 @@ type AsyncMessage struct {
 	flags Flags
 }
 
+func (m *AsyncMessage) GetAsyncMessage() *AsyncMessage {
+	return m
+}
+
 // Flag byte 1
 const (
 	AsyncMessage_CorrelationId uint8 = 1 << iota
@@ -294,6 +302,10 @@ type AcknowledgeMessage struct {
 	flags Flags
 }
 
+func (m *AcknowledgeMessage) GetAcknowledgeMessage() *AcknowledgeMessage {
+	return m
+}
+
 func (m *AcknowledgeMessage) ReadExternal(d *amf.Decoder) error {
 	if err := m.AsyncMessage.ReadExternal(d); err != nil {
 		return err
@@ -341,12 +353,8 @@ type ErrorMessage struct {
 	ExtendedData interface{} `amf3:"extendedData"`
 }
 
-func (m *ErrorMessage) ReadExternal(d *amf.Decoder) error {
-	return m.AcknowledgeMessage.ReadExternal(d)
-}
-
-func (m *ErrorMessage) WriteExternal(e *amf.Encoder) error {
-	return m.AcknowledgeMessage.WriteExternal(e)
+func (m *ErrorMessage) GetErrorMessage() *ErrorMessage {
+	return m
 }
 
 /* CommandMessage */
@@ -355,6 +363,10 @@ type CommandMessage struct {
 	Operation *int32 `amf3:"operation"`
 
 	flags Flags
+}
+
+func (m *CommandMessage) GetCommandMessage() *CommandMessage {
+	return m
 }
 
 // Flag byte 1
@@ -410,4 +422,8 @@ type RemotingMessage struct {
 	AbstractMessage
 	Source    interface{} `amf3:"source"`
 	Operation *string     `amf3:"operation"`
+}
+
+func (m *RemotingMessage) GetRemotingMessage() *RemotingMessage {
+	return m
 }
