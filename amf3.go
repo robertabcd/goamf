@@ -9,6 +9,8 @@ import (
 )
 
 type Decoder struct {
+	VerboseLog bool
+
 	TraitsMapper *TraitsMapper
 
 	reader io.Reader
@@ -516,5 +518,7 @@ func (d *Decoder) createObject(className string) interface{} {
 }
 
 func (d *Decoder) logPrintln(objs ...interface{}) {
-	//fmt.Println(objs...)
+	if d.VerboseLog {
+		fmt.Println(objs...)
+	}
 }

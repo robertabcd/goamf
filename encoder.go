@@ -13,6 +13,8 @@ type ExternalizeWritable interface {
 }
 
 type Encoder struct {
+	VerboseLog bool
+
 	TraitsMapper *TraitsMapper
 
 	writer io.Writer
@@ -352,5 +354,7 @@ func (e *Encoder) getReflectTraits(v reflect.Value) (traits *Traits, ref int) {
 }
 
 func (e *Encoder) logPrintln(objs ...interface{}) {
-	//fmt.Println(objs...)
+	if e.VerboseLog {
+		fmt.Println(objs...)
+	}
 }
