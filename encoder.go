@@ -57,7 +57,7 @@ func (e *Encoder) WriteUInt29(v uint32) error {
 		b[0] = 0x80 | byte((v>>22)&0x7F)
 		b[1] = 0x80 | byte((v>>15)&0x7F)
 		b[2] = 0x80 | byte((v>>8)&0x7F)
-		b[3] = byte(v & 0x7F)
+		b[3] = byte(v & 0xFF)
 	} else {
 		b = b[:3]
 		b[0] = byte((v >> 14) & 0x7F)
