@@ -164,7 +164,7 @@ func init() {
 /* AbstractMessage */
 type AbstractMessage struct {
 	Body        interface{} `amf3:"body"`
-	CliendId    *UUID       `amf3:"clientId"`
+	ClientId    *UUID       `amf3:"clientId"`
 	Destination *string     `amf3:"destination"`
 	Headers     interface{} `amf3:"headers"`
 	MessageId   *UUID       `amf3:"messageId"`
@@ -198,7 +198,7 @@ const (
 func (m *AbstractMessage) flagData0() []interface{} {
 	return []interface{}{
 		AbstractMessage_Body, &m.Body,
-		AbstractMessage_ClientId, &m.CliendId,
+		AbstractMessage_ClientId, &m.ClientId,
 		AbstractMessage_Destination, &m.Destination,
 		AbstractMessage_Headers, &m.Headers,
 		AbstractMessage_MessageId, &m.MessageId,
