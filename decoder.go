@@ -160,7 +160,9 @@ func (d *Decoder) ReadValue(vptr interface{}) error {
 			if err := binary.Read(d.reader, binary.BigEndian, &f); err != nil {
 				return err
 			}
-			t := time.Unix(int64(f), 0)
+			msecs := int64(f)
+			nsecs := 1e6*(msecs%1000) + int64(1e6*(f-float64(msecs)))
+			t := time.Unix(msecs/1000, nsecs)
 			d.objectRefs.Add(t)
 			return setReflectValue(v, t)
 		}
