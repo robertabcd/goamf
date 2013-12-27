@@ -354,7 +354,7 @@ func (e *Encoder) getReflectTraits(v reflect.Value) (traits *Traits, ref int) {
 }
 
 func (e *Encoder) logPrintln(objs ...interface{}) {
-	if e.VerboseLog {
+	if e.VerboseLog || Debug {
 		fmt.Println(objs...)
 	}
 }

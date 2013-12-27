@@ -520,7 +520,7 @@ func (d *Decoder) createObject(className string) interface{} {
 }
 
 func (d *Decoder) logPrintln(objs ...interface{}) {
-	if d.VerboseLog {
+	if d.VerboseLog || Debug {
 		fmt.Println(objs...)
 	}
 }
